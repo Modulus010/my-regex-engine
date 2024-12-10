@@ -6,203 +6,204 @@ import (
 	"strings"
 )
 
-type tokenType uint8
-
-const (
-	group           tokenType = iota
-	bracket         tokenType = iota
-	or              tokenType = iota
-	repeat          tokenType = iota
-	literal         tokenType = iota
-	groupUncaptured tokenType = iota
-)
-
-type token struct {
-	tokenType tokenType
-	value     interface{}
+type context struct {
+	regex string
+	pos   int
 }
 
-type parseContext struct {
-	pos    int
-	tokens []token
+func (ctx context) cur() byte {
+	return ctx.regex[ctx.pos]
 }
 
-func parse(regex string) *parseContext {
-	ctx := &parseContext{
-		pos:    0,
-		tokens: []token{},
-	}
-	for ctx.pos < len(regex) {
-		process(regex, ctx)
-		ctx.pos++
-	}
-	return ctx
-}
-
-func process(regex string, ctx *parseContext) {
-	ch := regex[ctx.pos]
-	switch ch {
-	case '(':
-		{
-			groupCtx := &parseContext{
-				pos:    ctx.pos,
-				tokens: []token{},
-			}
-			parseGroup(regex, groupCtx)
-			ctx.tokens = append(ctx.tokens, token{tokenType: group, value: groupCtx.tokens})
-		}
-	case '[':
-		parseBracket(regex, ctx)
-	case '|':
-		parseOr(regex, ctx)
-	case '*', '?', '+':
-		parseRepeat(regex, ctx)
-	case '{':
-		parseRepeatSpecified(regex, ctx)
-	default:
-		{
-			t := token{
-				tokenType: literal,
-				value:     ch,
-			}
-			ctx.tokens = append(ctx.tokens, t)
-		}
-	}
-}
-
-func parseGroup(regex string, ctx *parseContext) {
+func (ctx *context) adv() {
 	ctx.pos++
-	for regex[ctx.pos] != ')' {
-		process(regex, ctx)
-		ctx.pos++
-	}
 }
 
-func parseBracket(regex string, ctx *parseContext) {
-	ctx.pos++
-	var literals []string
-	for regex[ctx.pos] != ']' {
-		ch := regex[ctx.pos]
-		if ch == '-' {
-			next := regex[ctx.pos+1]
-			prev := literals[len(literals)-1][0]
-			literals[len(literals)-1] = fmt.Sprintf("%c%c", prev, next)
-			ctx.pos++
-		} else {
-			literals = append(literals, string(ch))
-		}
-		ctx.pos++
-	}
-	literalsSet := make(map[uint8]bool)
-	for _, l := range literals {
-		for i := l[0]; i <= l[len(l)-1]; i++ {
-			literalsSet[i] = true
-		}
-	}
-	ctx.tokens = append(ctx.tokens, token{
-		tokenType: bracket,
-		value:     literalsSet,
-	})
+func (ctx context) isEnd() bool {
+	return ctx.pos >= len(ctx.regex)
 }
 
-func parseOr(regex string, ctx *parseContext) {
-	rhsContext := &parseContext{
-		pos:    ctx.pos,
-		tokens: []token{},
+func (ctx *context) consume(ch byte) {
+	if ctx.isEnd() || ctx.cur() != ch {
+		panic("syntax error")
 	}
-	rhsContext.pos++
-	for rhsContext.pos < len(regex) && regex[rhsContext.pos] != ')' {
-		process(regex, rhsContext)
-		rhsContext.pos++
-	}
-
-	left := token{
-		tokenType: groupUncaptured,
-		value:     ctx.tokens,
-	}
-	right := token{
-		tokenType: groupUncaptured,
-		value:     rhsContext.tokens,
-	}
-	ctx.pos = rhsContext.pos
-	ctx.tokens = []token{{
-		tokenType: or,
-		value:     []token{left, right},
-	}}
+	ctx.adv()
 }
 
-type repeatPayload struct {
+type Node interface {
+}
+
+type exp struct {
+	children Node
+}
+
+func newExp(ctx *context) exp {
+	return exp{newOr(ctx)}
+}
+
+type or struct {
+	children []Node
+}
+
+func newOr(ctx *context) (nd or) {
+	nd.children = []Node{newConcat(ctx)}
+	for ctx.cur() == '|' {
+		ctx.adv()
+		nd.children = append(nd.children, newConcat(ctx))
+	}
+	return nd
+}
+
+type concat struct {
+	children []Node
+}
+
+func newConcat(ctx *context) (nd concat) {
+	nd.children = []Node{newRepeat(ctx)}
+	for !ctx.isEnd() {
+		nd.children = append(nd.children, newRepeat(ctx))
+	}
+	return nd
+}
+
+type repeat struct {
+	children   Node
+	quantifier quantifier
+}
+
+func newRepeat(ctx *context) (nd repeat) {
+	nd.children = newAtom(ctx)
+	nd.quantifier = quantifier{1, 1}
+	for ctx.cur() == '*' || ctx.cur() == '+' || ctx.cur() == '?' || ctx.cur() == '{' {
+		nd = repeat{nd.children, newQuantifier(ctx)}
+	}
+	return nd
+}
+
+type quantifier struct {
 	min, max int
-	token    token
 }
 
-const repeatInfinity = -1
+const timeInf = -1
 
-func parseRepeat(regex string, ctx *parseContext) {
-	ch := regex[ctx.pos]
-	var min, max int
-	switch ch {
+func newQuantifier(ctx *context) quantifier {
+	switch ctx.cur() {
 	case '*':
-		min = 0
-		max = repeatInfinity
+		ctx.adv()
+		return quantifier{0, timeInf}
 	case '+':
-		min = 1
-		max = repeatInfinity
+		ctx.adv()
+		return quantifier{1, timeInf}
 	case '?':
-		min = 0
-		max = 1
+		ctx.adv()
+		return quantifier{0, 1}
+	case '{':
+		return parseQuantifierSpecified(ctx)
 	}
-	lastToken := ctx.tokens[len(ctx.tokens)-1]
-	ctx.tokens[len(ctx.tokens)-1] = token{
-		tokenType: repeat,
-		value: repeatPayload{
-			min:   min,
-			max:   max,
-			token: lastToken,
-		},
-	}
+	return quantifier{1, 1}
 }
 
-func parseRepeatSpecified(regex string, ctx *parseContext) {
-	start := ctx.pos + 1
-	for regex[ctx.pos] != '}' {
-		ctx.pos++
+func parseQuantifierSpecified(ctx *context) quantifier {
+	ctx.consume('{')
+	defer ctx.consume('}')
+
+	substring := ""
+	for ctx.cur() != '}' {
+		substring += string(ctx.cur())
+		ctx.adv()
 	}
-	boundariesStr := regex[start:ctx.pos]
-	pieces := strings.Split(boundariesStr, ",")
-	var min, max int
+
+	pieces := strings.Split(substring, ",")
 	if len(pieces) == 1 {
 		if value, err := strconv.Atoi(pieces[0]); err != nil {
 			panic(err.Error())
 		} else {
-			min = value
-			max = value
+			return quantifier{value, value}
 		}
 	} else if len(pieces) == 2 {
-		if value, err := strconv.Atoi(pieces[0]); err != nil {
+		min, err := strconv.Atoi(pieces[0])
+		if err != nil {
 			panic(err.Error())
-		} else {
-			min = value
 		}
 
 		if pieces[1] == "" {
-			max = repeatInfinity
+			return quantifier{min, timeInf}
 		} else if value, err := strconv.Atoi(pieces[1]); err != nil {
 			panic(err.Error())
 		} else {
-			max = value
+			return quantifier{min, value}
 		}
 	} else {
-		panic(fmt.Sprintf("There must be either 1 or 2 values specified for the quantifier: provided '%s'", boundariesStr))
+		panic("syntax error")
+	}
+}
+
+type atom struct {
+	children Node
+}
+
+func newAtom(ctx *context) (nd atom) {
+	switch ctx.cur() {
+	case '(':
+		nd.children = newGroup(ctx)
+	case '[':
+		nd.children = newSet(ctx)
+	default:
+		nd.children = newLiteral(ctx)
+	}
+	return nd
+}
+
+type literal byte
+
+func newLiteral(ctx *context) (nd literal) {
+	nd = literal(ctx.cur())
+	ctx.adv()
+	return nd
+}
+
+type set struct {
+	val map[byte]bool
+}
+
+func newSet(ctx *context) (nd set) {
+	ctx.consume('[')
+	defer ctx.consume(']')
+
+	var literals []string
+	for ctx.cur() != ']' {
+		ch := ctx.cur()
+		if ch == '-' {
+			ctx.adv()
+			if ctx.isEnd() || ctx.cur() == ']' || len(literals) == 0 {
+				panic("syntax error")
+			}
+			next := ctx.cur()
+			prev := literals[len(literals)-1][0]
+			literals[len(literals)-1] = fmt.Sprintf("%c%c", prev, next)
+			ctx.adv()
+		} else {
+			literals = append(literals, string(ch))
+		}
+		ctx.adv()
 	}
 
-	lastToken := ctx.tokens[len(ctx.tokens)-1]
-	ctx.tokens[len(ctx.tokens)-1] = token{
-		tokenType: repeat,
-		value: repeatPayload{
-			min:   min,
-			max:   max,
-			token: lastToken,
-		},
+	nd.val = make(map[byte]bool)
+	for _, l := range literals {
+		for i := l[0]; i <= l[len(l)-1]; i++ {
+			nd.val[i] = true
+		}
 	}
+	return nd
+}
+
+type group struct {
+	children Node
+}
+
+func newGroup(ctx *context) (nd group) {
+	ctx.consume('(')
+	defer ctx.consume(')')
+	nd.children = newExp(ctx)
+	return nd
 }
