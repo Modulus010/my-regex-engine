@@ -1,7 +1,13 @@
 package parse
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/Modulus010/my-regex-engine/pkg/nfa"
+)
 
 type Node interface {
 	fmt.Stringer
+
+	toNFA() *nfa.NFA
 }

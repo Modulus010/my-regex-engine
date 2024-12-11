@@ -1,5 +1,7 @@
 package parse
 
+import "github.com/Modulus010/my-regex-engine/pkg/nfa"
+
 type or struct {
 	child []Node
 }
@@ -13,4 +15,15 @@ func (o *or) String() string {
 		res += "|" + c.String()
 	}
 	return res + ")"
+}
+
+func (o *or) toNFA() *nfa.NFA {
+	start := nfa.NewState()
+	accept := nfa.NewState()
+	for _, c := range o.child {
+		chNFA := c.toNFA()
+		start.Add(nfa.EPS, chNFA.Start)
+		chNFA.Accept.Add(nfa.EPS, accept)
+	}
+	return nfa.NewNFA(start, accept)
 }

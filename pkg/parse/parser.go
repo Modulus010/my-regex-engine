@@ -10,6 +10,10 @@ type Parser struct {
 	pos   int
 }
 
+func NewParser(regex string) *Parser {
+	return &Parser{regex: regex}
+}
+
 func (p *Parser) Parse() (Node, error) {
 	nd, err := p.parseOr()
 	if err != nil {

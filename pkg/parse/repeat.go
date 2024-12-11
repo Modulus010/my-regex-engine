@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/Modulus010/my-regex-engine/pkg/nfa"
 )
 
 type repeat struct {
@@ -92,4 +94,35 @@ func (r *repeat) String() string {
 		}
 	}
 	return res
+}
+
+func (r *repeat) toNFA() *nfa.NFA {
+	start := nfa.NewState()
+	accept := start
+	for i := 0; i < r.quantifier.min; i++ {
+		chNFA := r.child.toNFA()
+		accept.Add(nfa.EPS, chNFA.Start)
+		accept = chNFA.Accept
+	}
+
+	if r.quantifier.max == quantifierInf {
+		chNFA := r.child.toNFA()
+		repeatStart := chNFA.Accept
+		repeatAccept := chNFA.Start
+		repeatStart.Add(nfa.EPS, repeatAccept)
+		accept.Add(nfa.EPS, repeatStart)
+		accept = repeatAccept
+	} else {
+		var midStates []*nfa.State
+		for i := r.quantifier.min; i < r.quantifier.max; i++ {
+			midStates = append(midStates, accept)
+			chNFA := r.child.toNFA()
+			accept.Add(nfa.EPS, chNFA.Start)
+			accept = chNFA.Accept
+		}
+		for _, midState := range midStates {
+			midState.Add(nfa.EPS, accept)
+		}
+	}
+	return nfa.NewNFA(start, accept)
 }
