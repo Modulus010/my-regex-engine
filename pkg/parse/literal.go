@@ -8,7 +8,7 @@ func (l literal) String() string {
 	return string(l)
 }
 
-func (l literal) toNFA() *nfa.NFA {
+func (l literal) ToNFA() *nfa.NFA {
 	start := nfa.NewState()
 	accept := nfa.NewState()
 

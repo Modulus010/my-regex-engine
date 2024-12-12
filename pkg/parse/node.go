@@ -9,5 +9,5 @@ import (
 type Node interface {
 	fmt.Stringer
 
-	toNFA() *nfa.NFA
+	ToNFA() *nfa.NFA
 }

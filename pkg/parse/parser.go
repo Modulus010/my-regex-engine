@@ -15,9 +15,27 @@ func NewParser(regex string) *Parser {
 }
 
 func (p *Parser) Parse() (Node, error) {
-	nd, err := p.parseOr()
-	if err != nil {
+	nd := &sequence{[]Node{}}
+	add := func() {
+		nd.child = append(nd.child,
+			&repeat{child: literal('.'),
+				quantifier: &quantifier{min: 0, max: quantifierInf},
+			})
+	}
+	if p.cur() == '^' {
+		p.adv()
+	} else {
+		add()
+	}
+	if ch, err := p.parseOr(); err != nil {
 		return nil, err
+	} else {
+		nd.child = append(nd.child, ch)
+	}
+	if p.cur() == '$' {
+		p.adv()
+	} else {
+		add()
 	}
 	if !p.isEnd() {
 		return nil, parseErr{"EOF", p.cur(), p.pos}
@@ -106,6 +124,9 @@ func (p *Parser) parseSet() (Node, error) {
 		}
 		p.adv()
 	}
+	if state {
+		return nil, parseErr{"literal char", p.cur(), p.pos}
+	}
 	if err := p.consume(']'); err != nil {
 		return nil, err
 	}
@@ -169,7 +190,7 @@ func (p *Parser) consume(b byte) error {
 }
 
 func isLiteral(ch byte) bool {
-	return !strings.Contains("|*+?{}[]()", string(ch)) && ch != 0
+	return !strings.Contains("|*+?{}[]()^$", string(ch)) && ch != 0
 }
 
 type parseErr struct {

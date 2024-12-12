@@ -15,7 +15,7 @@ func (s *set) String() string {
 	return res
 }
 
-func (s *set) toNFA() *nfa.NFA {
+func (s *set) ToNFA() *nfa.NFA {
 	start := nfa.NewState()
 	accept := nfa.NewState()
 	for k := range s.chr {

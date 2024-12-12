@@ -14,12 +14,12 @@ func (s *sequence) String() string {
 	return res
 }
 
-func (s *sequence) toNFA() *nfa.NFA {
+func (s *sequence) ToNFA() *nfa.NFA {
 	start := nfa.NewState()
 	accept := start
 
 	for _, c := range s.child {
-		chNFA := c.toNFA()
+		chNFA := c.ToNFA()
 		accept.Add(nfa.EPS, chNFA.Start)
 		accept = chNFA.Accept
 	}

@@ -17,11 +17,11 @@ func (o *or) String() string {
 	return res + ")"
 }
 
-func (o *or) toNFA() *nfa.NFA {
+func (o *or) ToNFA() *nfa.NFA {
 	start := nfa.NewState()
 	accept := nfa.NewState()
 	for _, c := range o.child {
-		chNFA := c.toNFA()
+		chNFA := c.ToNFA()
 		start.Add(nfa.EPS, chNFA.Start)
 		chNFA.Accept.Add(nfa.EPS, accept)
 	}

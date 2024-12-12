@@ -13,7 +13,7 @@ type repeat struct {
 	quantifier *quantifier
 }
 
-const quantifierInf = -1
+const quantifierInf = 1000
 
 type quantifier struct {
 	min int
@@ -52,25 +52,27 @@ func (r *repeat) parseQuantifierSpecified(ctx *Parser) error {
 		substring += string(ctx.cur())
 		ctx.adv()
 	}
-
+	var minv, maxv int
 	pieces := strings.Split(substring, ",")
 	if len(pieces) == 1 {
 		if value, err := strconv.Atoi(pieces[0]); err != nil {
 			return err
 		} else {
-			r.quantifier = &quantifier{value, value}
+			minv = value
+			maxv = value
 		}
 	} else if len(pieces) == 2 {
-		min, err := strconv.Atoi(pieces[0])
-		if err != nil {
+		if min, err := strconv.Atoi(pieces[0]); err != nil {
 			return err
+		} else {
+			minv = min
 		}
 		if pieces[1] == "" {
-			r.quantifier = &quantifier{min, quantifierInf}
+			maxv = quantifierInf
 		} else if max, err := strconv.Atoi(pieces[1]); err != nil {
 			return err
 		} else {
-			r.quantifier = &quantifier{min, max}
+			maxv = max
 		}
 	} else {
 		return fmt.Errorf("invalid quantifier: %s", substring)
@@ -78,6 +80,10 @@ func (r *repeat) parseQuantifierSpecified(ctx *Parser) error {
 	if err := ctx.consume('}'); err != nil {
 		return err
 	}
+	if minv > maxv || minv < 0 || maxv < 0 || maxv > quantifierInf {
+		return fmt.Errorf("invalid quantifier: %d, %d", minv, maxv)
+	}
+	r.quantifier = &quantifier{minv, maxv}
 	return nil
 }
 
@@ -96,17 +102,17 @@ func (r *repeat) String() string {
 	return res
 }
 
-func (r *repeat) toNFA() *nfa.NFA {
+func (r *repeat) ToNFA() *nfa.NFA {
 	start := nfa.NewState()
 	accept := start
 	for i := 0; i < r.quantifier.min; i++ {
-		chNFA := r.child.toNFA()
+		chNFA := r.child.ToNFA()
 		accept.Add(nfa.EPS, chNFA.Start)
 		accept = chNFA.Accept
 	}
 
 	if r.quantifier.max == quantifierInf {
-		chNFA := r.child.toNFA()
+		chNFA := r.child.ToNFA()
 		repeatStart := chNFA.Accept
 		repeatAccept := chNFA.Start
 		repeatStart.Add(nfa.EPS, repeatAccept)
@@ -116,7 +122,7 @@ func (r *repeat) toNFA() *nfa.NFA {
 		var midStates []*nfa.State
 		for i := r.quantifier.min; i < r.quantifier.max; i++ {
 			midStates = append(midStates, accept)
-			chNFA := r.child.toNFA()
+			chNFA := r.child.ToNFA()
 			accept.Add(nfa.EPS, chNFA.Start)
 			accept = chNFA.Accept
 		}
